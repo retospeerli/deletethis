@@ -1,0 +1,899 @@
+// Mathematik Level Definitionen
+const MATH_LEVELS = {
+    1: { // 1. Klasse
+        name: "1. Klasse",
+        operations: ['+', '-'],
+        maxNumber: 20,
+        minNumber: 0,
+        description: "Addition und Subtraktion bis 20"
+    },
+    2: { // 2. Klasse
+        name: "2. Klasse",
+        operations: ['+', '-'],
+        maxNumber: 100,
+        minNumber: 0,
+        description: "Addition und Subtraktion bis 100"
+    },
+    3: { // 3. Klasse
+        name: "3. Klasse",
+        operations: ['+', '-', '×', '÷'],
+        maxNumber: 1000,
+        minNumber: 0,
+        multiplicationMax: 10,
+        description: "Addition/Subtraktion bis 1000, Einmaleins bis 10"
+    },
+    4: { // 4. Klasse
+        name: "4. Klasse",
+        operations: ['+', '-', '×', '÷'],
+        maxNumber: 10000,
+        minNumber: 0,
+        multiplicationMax: 20,
+        multiplesOfTen: true,
+        description: "Addition/Subtraktion bis 10.000, Einmaleins bis 20"
+    }
+};
+
+// Zeit-Modi
+const TIME_MODES = {
+    5: { name: "Schwer", time: 5, className: "hard" },
+    8: { name: "Mittel", time: 8, className: "medium" },
+    15: { name: "Einfach", time: 15, className: "easy" },
+    0: { name: "Training", time: 0, className: "training" }
+};
+
+// Ring Position Mapping (Score Difference -> Image Number)
+const RING_POSITION_MAP = {
+    "-4": 1,   // CPU fast Round Win (CPU kurz vor Rundengewinn)
+    "-3": 2,   // CPU almost lost Sound Position
+    "-2": 3,   // CPU etwas vorne
+    "-1": 4,   // CPU minimal vorne
+    "0": 6,    // Ausgangslage Mitte
+    "1": 7,    // Spieler minimal vorne
+    "2": 8,    // Spieler etwas vorne
+    "3": 9,    // Spieler almost won Sound Position
+    "4": 11    // Spieler fast Round Win
+};
+
+// Audio-Elemente
+const startSound = document.getElementById('start-sound');
+const correctSound = document.getElementById('correct-sound');
+const errorSound = document.getElementById('error-sound');
+const roundWonSound = document.getElementById('roundwon-sound');
+const roundLostSound = document.getElementById('roundlost-sound');
+const gameWonSound = document.getElementById('gamewon-sound');
+const gameLostSound = document.getElementById('gamelost-sound');
+const almostLostSound = document.getElementById('almostlost-sound');
+const almostWonSound = document.getElementById('almostwon-sound');
+
+// DOM-Elemente für Best of 7
+const playerScoreElement = document.getElementById('player-score');
+const cpuScoreElement = document.getElementById('cpu-score');
+const ringImage = document.getElementById('ring-image');
+const currentRoundElement = document.getElementById('current-round');
+const streakElement = document.getElementById('streak');
+const totalPointsElement = document.getElementById('total-points');
+
+// DOM-Elemente für Mathematik
+const classButtons = document.querySelectorAll('.class-btn');
+const timeButtons = document.querySelectorAll('.time-btn');
+const classIndicator = document.getElementById('class-indicator');
+const taskElement = document.getElementById('task');
+const choiceButtons = [
+    document.getElementById('choice1'),
+    document.getElementById('choice2'),
+    document.getElementById('choice3'),
+    document.getElementById('choice4')
+];
+const timerDisplay = document.getElementById('timer-display');
+const timerValue = document.getElementById('timer-value');
+const trainingInfo = document.getElementById('training-info');
+const trainingProgress = document.getElementById('training-progress');
+const currentTaskNum = document.getElementById('current-task-num');
+const correctCount = document.getElementById('correct-count');
+const totalTasks = document.getElementById('total-tasks');
+const trainingProgressBar = document.getElementById('training-progress-bar');
+
+// Controls
+const startButton = document.getElementById('start-btn');
+const hintButton = document.getElementById('hint-btn');
+const resetButton = document.getElementById('reset-btn');
+
+// Game Over Elements
+const gameOverElement = document.getElementById('game-over');
+const finalScoreElement = document.getElementById('final-score');
+const totalPointsFinalElement = document.getElementById('total-points-final');
+const correctPercentageElement = document.getElementById('correct-percentage');
+const maxStreakElement = document.getElementById('max-streak');
+const finalClassElement = document.getElementById('final-class');
+const gameResultElement = document.getElementById('game-result');
+const gameMessageElement = document.getElementById('game-message');
+const restartButton = document.getElementById('restart-btn');
+
+// Feedback Element
+const feedbackElement = document.getElementById('feedback');
+
+// Spielzustand - UPDATED für Round-internal tracking
+const gameState = {
+    currentLevel: 1,
+    currentTimeMode: 5,
+    currentTask: null,
+    correctAnswer: null,
+    
+    // Best of 7 State
+    playerScore: 0,
+    cpuScore: 0,
+    currentRound: 1,
+    playerStreak: 0,
+    maxStreak: 0,
+    totalPoints: 0,
+    
+    // Round-internal State (für almost sounds)
+    roundInternalState: {
+        playerRoundPoints: 0,    // Punkte innerhalb der aktuellen Runde
+        cpuRoundPoints: 0,       // Punkte innerhalb der aktuellen Runde
+        roundFinished: false,    // Ist die Runde beendet?
+        roundStartTime: null,    // Startzeit der Runde
+        almostLostPlayed: false, // Wurde almostlost schon gespielt?
+        almostWonPlayed: false   // Wurde almostwon schon gespielt?
+    },
+    
+    // General State
+    totalCorrect: 0,
+    totalQuestions: 0,
+    gameActive: false,
+    gameFinished: false,
+    trainingMode: false,
+    trainingTasks: 30,
+    currentTrainingTask: 1,
+    trainingCorrect: 0,
+    timer: null,
+    timeLeft: 15,
+    lastRingPosition: 6
+};
+
+// Zufallszahl generieren
+function getRandomNumber(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// Mathematikaufgabe generieren
+function generateMathTask(level) {
+    const levelConfig = MATH_LEVELS[level];
+    let task, correctAnswer, operation;
+    
+    const randomOpIndex = Math.floor(Math.random() * levelConfig.operations.length);
+    operation = levelConfig.operations[randomOpIndex];
+    
+    switch(operation) {
+        case '+':
+            const add1 = getRandomNumber(levelConfig.minNumber, levelConfig.maxNumber);
+            const add2 = getRandomNumber(levelConfig.minNumber, levelConfig.maxNumber - add1);
+            correctAnswer = add1 + add2;
+            task = `${add1} + ${add2} = ?`;
+            break;
+            
+        case '-':
+            const sub1 = getRandomNumber(levelConfig.minNumber, levelConfig.maxNumber);
+            const sub2 = getRandomNumber(levelConfig.minNumber, sub1);
+            correctAnswer = sub1 - sub2;
+            task = `${sub1} - ${sub2} = ?`;
+            break;
+            
+        case '×':
+            let factor1, factor2;
+            
+            if (level === 4 && Math.random() > 0.5 && levelConfig.multiplesOfTen) {
+                factor1 = getRandomNumber(1, 10) * 10;
+                factor2 = getRandomNumber(1, 10);
+            } else {
+                factor1 = getRandomNumber(1, levelConfig.multiplicationMax);
+                factor2 = getRandomNumber(1, levelConfig.multiplicationMax);
+            }
+            
+            correctAnswer = factor1 * factor2;
+            task = `${factor1} × ${factor2} = ?`;
+            break;
+            
+        case '÷':
+            let divisor, quotient;
+            
+            if (level === 4 && Math.random() > 0.5 && levelConfig.multiplesOfTen) {
+                quotient = getRandomNumber(1, 10) * 10;
+                divisor = getRandomNumber(1, 10);
+                correctAnswer = quotient;
+                task = `${quotient * divisor} ÷ ${divisor} = ?`;
+            } else {
+                divisor = getRandomNumber(1, levelConfig.multiplicationMax);
+                quotient = getRandomNumber(1, levelConfig.multiplicationMax);
+                correctAnswer = quotient;
+                task = `${divisor * quotient} ÷ ${divisor} = ?`;
+            }
+            break;
+    }
+    
+    return { task, correctAnswer, operation };
+}
+
+// Falsche Antworten generieren
+function generateWrongAnswers(correctAnswer, level) {
+    const wrongAnswers = new Set();
+    const levelConfig = MATH_LEVELS[level];
+    
+    while (wrongAnswers.size < 3) {
+        let wrongAnswer;
+        
+        if (Math.random() > 0.5) {
+            wrongAnswer = correctAnswer + getRandomNumber(-2, 2);
+        } else if (Math.random() > 0.5) {
+            const offset = Math.max(1, Math.floor(correctAnswer * 0.1));
+            wrongAnswer = correctAnswer + getRandomNumber(-offset, offset);
+        } else {
+            wrongAnswer = getRandomNumber(
+                Math.max(levelConfig.minNumber, correctAnswer - 10),
+                Math.min(levelConfig.maxNumber * 2, correctAnswer + 10)
+            );
+        }
+        
+        if (wrongAnswer !== correctAnswer && wrongAnswer >= 0 && 
+            !wrongAnswers.has(wrongAnswer) && wrongAnswer <= levelConfig.maxNumber * 2) {
+            wrongAnswers.add(wrongAnswer);
+        }
+    }
+    
+    return Array.from(wrongAnswers);
+}
+
+// Round-internal Score berechnen (für almost sounds)
+function calculateRoundInternalScore() {
+    // In einer Runde: Max 10 Punkte möglich
+    // Player gewinnt Runde bei 10 Punkten, CPU bei 10 Punkten
+    // Almost lost: Player hat 1 Punkt, CPU hat 9 Punkte (CPU kurz vor Rundengewinn)
+    // Almost won: Player hat 9 Punkte, CPU hat 1 Punkt (Player kurz vor Rundengewinn)
+    
+    const totalRoundPoints = gameState.roundInternalState.playerRoundPoints + 
+                           gameState.roundInternalState.cpuRoundPoints;
+    
+    // Normalisieren auf 10-Punkte-Skala für Ring-Position
+    let normalizedDifference = 0;
+    
+    if (totalRoundPoints > 0) {
+        const playerPercentage = gameState.roundInternalState.playerRoundPoints / totalRoundPoints;
+        const cpuPercentage = gameState.roundInternalState.cpuRoundPoints / totalRoundPoints;
+        
+        // -4 bis +4 Skala basierend auf Punktedifferenz
+        normalizedDifference = Math.round((playerPercentage - cpuPercentage) * 4);
+    }
+    
+    return normalizedDifference;
+}
+
+// Ring-Bild aktualisieren mit ROUND-INTERNAL almost sounds
+function updateRingImage() {
+    let imageNumber = 6; // Default Mitte
+    
+    if (!gameState.trainingMode && !gameState.roundInternalState.roundFinished) {
+        // Best of 7 Mode: Ring-Position basierend auf round-internal score
+        const roundScoreDiff = calculateRoundInternalScore();
+        imageNumber = RING_POSITION_MAP[roundScoreDiff.toString()] || 6;
+        
+        // ROUND-INTERNAL Almost Sounds abspielen
+        if (gameState.gameActive) {
+            // ALMOST LOST: CPU kurz vor Rundengewinn (Position 2)
+            if (imageNumber === 2 && !gameState.roundInternalState.almostLostPlayed) {
+                almostLostSound.currentTime = 0;
+                almostLostSound.play();
+                gameState.roundInternalState.almostLostPlayed = true;
+                
+                // Visuelles Feedback
+                showRoundFeedback("⚠️ CPU KURZ VOR RUNDENGEWINN!", "warning");
+            }
+            
+            // ALMOST WON: Spieler kurz vor Rundengewinn (Position 10)
+            if (imageNumber === 10 && !gameState.roundInternalState.almostWonPlayed) {
+                almostWonSound.currentTime = 0;
+                almostWonSound.play();
+                gameState.roundInternalState.almostWonPlayed = true;
+                
+                // Visuelles Feedback
+                showRoundFeedback("⭐ DU KURZ VOR RUNDENGEWINN!", "success");
+            }
+        }
+    } else if (gameState.trainingMode) {
+        // Training Mode: Basierend auf Gesamt-Performance
+        if (gameState.totalQuestions > 0) {
+            const percentage = gameState.totalCorrect / gameState.totalQuestions;
+            if (percentage < 0.3) imageNumber = 3;
+            else if (percentage < 0.5) imageNumber = 4;
+            else if (percentage < 0.7) imageNumber = 6;
+            else if (percentage < 0.9) imageNumber = 7;
+            else imageNumber = 8;
+        }
+    } else {
+        // Best of 7 Gesamt-Score für Ring
+        const scoreDifference = gameState.playerScore - gameState.cpuScore;
+        const clampedDifference = Math.max(-4, Math.min(4, scoreDifference));
+        imageNumber = RING_POSITION_MAP[clampedDifference.toString()] || 6;
+    }
+    
+    // Bild aktualisieren
+    ringImage.src = `wrestlers/ring_position_${imageNumber}.png`;
+    gameState.lastRingPosition = imageNumber;
+    
+    // Flash Animation
+    ringImage.classList.add('image-flash');
+    setTimeout(() => {
+        ringImage.classList.remove('image-flash');
+    }, 300);
+}
+
+// Round-internal Feedback anzeigen
+function showRoundFeedback(message, type) {
+    // Temporäres Feedback für Round-internal Zustände
+    const oldFeedback = feedbackElement.textContent;
+    const oldClass = feedbackElement.className;
+    
+    feedbackElement.textContent = message;
+    feedbackElement.className = `feedback ${type}`;
+    
+    // Nach 1.5 Sekunden zurücksetzen
+    setTimeout(() => {
+        if (gameState.gameActive && !gameState.gameFinished) {
+            feedbackElement.textContent = oldFeedback;
+            feedbackElement.className = oldClass;
+        }
+    }, 1500);
+}
+
+// Round-internal State zurücksetzen (neue Runde starten)
+function resetRoundInternalState() {
+    gameState.roundInternalState = {
+        playerRoundPoints: 0,
+        cpuRoundPoints: 0,
+        roundFinished: false,
+        roundStartTime: Date.now(),
+        almostLostPlayed: false,
+        almostWonPlayed: false
+    };
+}
+
+// Check if round is finished (innerhalb von Best of 7)
+function checkRoundFinished() {
+    if (gameState.trainingMode || gameState.roundInternalState.roundFinished) return false;
+    
+    // Eine Runde ist beendet, wenn eine Seite 10 Punkte erreicht
+    const playerWinsRound = gameState.roundInternalState.playerRoundPoints >= 10;
+    const cpuWinsRound = gameState.roundInternalState.cpuRoundPoints >= 10;
+    
+    if (playerWinsRound || cpuWinsRound) {
+        gameState.roundInternalState.roundFinished = true;
+        
+        // Kurze Verzögerung, dann nächste Runde
+        setTimeout(() => {
+            if (playerWinsRound) {
+                // Spieler gewinnt die Runde (für Best of 7)
+                gameState.playerScore++;
+                gameState.playerStreak++;
+                gameState.totalPoints += 10;
+                gameState.totalCorrect++;
+                
+                roundWonSound.currentTime = 0;
+                roundWonSound.play();
+                
+                feedbackElement.textContent = "🎉 RUNDE GEWONNEN! +1 PUNKT";
+                feedbackElement.className = "feedback correct";
+            } else {
+                // CPU gewinnt die Runde (für Best of 7)
+                gameState.cpuScore++;
+                gameState.playerStreak = 0;
+                
+                roundLostSound.currentTime = 0;
+                roundLostSound.play();
+                
+                feedbackElement.textContent = "💀 RUNDE VERLOREN! +1 PUNKT FÜR CPU";
+                feedbackElement.className = "feedback error";
+            }
+            
+            gameState.totalQuestions++;
+            
+            // Check for game victory
+            if (gameState.playerScore >= 4 || gameState.cpuScore >= 4) {
+                gameState.gameFinished = true;
+                setTimeout(() => {
+                    endGame(gameState.playerScore >= 4);
+                }, 2000);
+                return;
+            }
+            
+            // Nächste Runde vorbereiten
+            gameState.currentRound++;
+            
+            // Nach 2 Sekunden nächste Runde starten
+            setTimeout(() => {
+                if (!gameState.gameFinished) {
+                    resetRoundInternalState();
+                    updateBestOf7Display();
+                    loadNextQuestion();
+                }
+            }, 2000);
+            
+        }, 1500);
+        
+        return true;
+    }
+    
+    return false;
+}
+
+// Best of 7 Display aktualisieren
+function updateBestOf7Display() {
+    playerScoreElement.textContent = gameState.playerScore;
+    cpuScoreElement.textContent = gameState.cpuScore;
+    currentRoundElement.textContent = gameState.currentRound;
+    streakElement.textContent = gameState.playerStreak;
+    totalPointsElement.textContent = gameState.totalPoints;
+    
+    // Ring-Bild aktualisieren (mit round-internal Sound-Trigger)
+    updateRingImage();
+    
+    // Training Mode spezifische Updates
+    if (gameState.trainingMode) {
+        currentTaskNum.textContent = gameState.currentTrainingTask;
+        correctCount.textContent = gameState.trainingCorrect;
+        totalTasks.textContent = gameState.trainingTasks;
+        const progress = (gameState.currentTrainingTask - 1) / gameState.trainingTasks * 100;
+        trainingProgressBar.style.width = `${progress}%`;
+    }
+}
+
+// Timer starten
+function startTimer() {
+    if (gameState.trainingMode || gameState.currentTimeMode === 0) return;
+    
+    gameState.timeLeft = TIME_MODES[gameState.currentTimeMode].time;
+    timerValue.textContent = gameState.timeLeft;
+    timerDisplay.className = `timer-display ${TIME_MODES[gameState.currentTimeMode].className}`;
+    timerDisplay.style.display = 'block';
+    
+    if (gameState.timeLeft <= 3) {
+        timerDisplay.classList.add('warning');
+    } else {
+        timerDisplay.classList.remove('warning');
+    }
+    
+    gameState.timer = setInterval(() => {
+        gameState.timeLeft--;
+        timerValue.textContent = gameState.timeLeft;
+        
+        if (gameState.timeLeft <= 3) {
+            timerDisplay.classList.add('warning');
+        }
+        
+        if (gameState.timeLeft <= 0) {
+            clearInterval(gameState.timer);
+            timeOut();
+        }
+    }, 1000);
+}
+
+// Timer stoppen
+function stopTimer() {
+    if (gameState.timer) {
+        clearInterval(gameState.timer);
+        gameState.timer = null;
+    }
+    timerDisplay.style.display = 'none';
+}
+
+// Zeit abgelaufen - innerhalb einer Runde
+function timeOut() {
+    if (!gameState.gameActive || gameState.gameFinished || 
+        gameState.roundInternalState.roundFinished) return;
+    
+    // CPU bekommt Punkt innerhalb der Runde
+    gameState.roundInternalState.cpuRoundPoints += 2; // Zeitablauf ist schwerwiegender
+    
+    feedbackElement.textContent = "⏰ ZEIT ABGELAUFEN! +2 PUNKTE FÜR CPU";
+    feedbackElement.className = "feedback error";
+    
+    errorSound.currentTime = 0;
+    errorSound.play();
+    
+    // Prüfen ob Runde beendet
+    if (!checkRoundFinished()) {
+        // Nächste Frage in derselben Runde
+        setTimeout(() => {
+            if (!gameState.gameFinished) {
+                loadNextQuestion();
+            }
+        }, 2000);
+    }
+}
+
+// Neue Frage laden
+function loadNextQuestion() {
+    if (gameState.gameFinished) return;
+    
+    // Timer stoppen
+    stopTimer();
+    
+    // Neue Aufgabe generieren
+    const task = generateMathTask(gameState.currentLevel);
+    gameState.currentTask = task.task;
+    gameState.correctAnswer = task.correctAnswer;
+    
+    // Aufgabe anzeigen
+    taskElement.textContent = gameState.currentTask;
+    classIndicator.textContent = MATH_LEVELS[gameState.currentLevel].name;
+    classIndicator.className = `class-indicator class-${gameState.currentLevel}`;
+    
+    // Antwortoptionen generieren
+    const wrongAnswers = generateWrongAnswers(task.correctAnswer, gameState.currentLevel);
+    const allAnswers = [task.correctAnswer, ...wrongAnswers];
+    shuffleArray(allAnswers);
+    
+    // Buttons mit Antworten füllen
+    choiceButtons.forEach((btn, index) => {
+        btn.textContent = allAnswers[index];
+        btn.dataset.answer = allAnswers[index];
+        btn.disabled = false;
+        btn.className = "choice-btn";
+    });
+    
+    // Timer starten (wenn nicht Training)
+    if (!gameState.trainingMode) {
+        startTimer();
+    }
+    
+    // Tipp-Button aktivieren
+    hintButton.disabled = false;
+}
+
+// Array mischen
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+}
+
+// Antwort überprüfen - UPDATED für round-internal scoring
+function checkAnswer(selectedAnswer) {
+    if (!gameState.gameActive || gameState.gameFinished || 
+        gameState.roundInternalState.roundFinished) return;
+    
+    const isCorrect = parseInt(selectedAnswer) === gameState.correctAnswer;
+    
+    // Buttons deaktivieren
+    choiceButtons.forEach(btn => {
+        btn.disabled = true;
+        
+        if (parseInt(btn.dataset.answer) === gameState.correctAnswer) {
+            btn.classList.add('correct');
+        } else if (parseInt(btn.dataset.answer) === parseInt(selectedAnswer) && !isCorrect) {
+            btn.classList.add('error');
+        }
+    });
+    
+    // Timer stoppen
+    stopTimer();
+    
+    if (isCorrect) {
+        // RICHTIG - Spieler bekommt Punkt innerhalb der Runde
+        gameState.roundInternalState.playerRoundPoints += 1;
+        gameState.playerStreak++;
+        gameState.totalPoints += 10;
+        
+        if (gameState.trainingMode) {
+            gameState.trainingCorrect++;
+            gameState.totalCorrect++;
+        }
+        
+        feedbackElement.textContent = `✓ RICHTIG! +1 PUNKT`;
+        feedbackElement.className = "feedback correct";
+        
+        correctSound.currentTime = 0;
+        correctSound.play();
+    } else {
+        // FALSCH - CPU bekommt Punkt innerhalb der Runde
+        gameState.roundInternalState.cpuRoundPoints += 1;
+        gameState.playerStreak = 0;
+        
+        feedbackElement.textContent = `✗ FALSCH! +1 PUNKT FÜR CPU`;
+        feedbackElement.className = "feedback error";
+        
+        errorSound.currentTime = 0;
+        errorSound.play();
+    }
+    
+    // Training Mode oder Best of 7?
+    if (gameState.trainingMode) {
+        // Training Mode: Einfach nächste Frage
+        gameState.totalQuestions++;
+        gameState.currentTrainingTask++;
+        
+        if (gameState.currentTrainingTask > gameState.trainingTasks) {
+            endTraining();
+            return;
+        }
+        
+        setTimeout(() => {
+            updateBestOf7Display();
+            loadNextQuestion();
+        }, 2000);
+    } else {
+        // Best of 7 Mode: Prüfen ob Runde beendet
+        gameState.totalQuestions++;
+        
+        if (!checkRoundFinished()) {
+            // Runde noch nicht beendet, nächste Frage
+            setTimeout(() => {
+                updateBestOf7Display();
+                loadNextQuestion();
+            }, 2000);
+        }
+    }
+}
+
+// Training beenden
+function endTraining() {
+    gameState.gameActive = false;
+    gameState.gameFinished = true;
+    
+    choiceButtons.forEach(btn => btn.disabled = true);
+    hintButton.disabled = true;
+    resetButton.disabled = false;
+    
+    const percentage = Math.round((gameState.trainingCorrect / gameState.trainingTasks) * 100);
+    
+    finalScoreElement.textContent = `TRAINING BEENDET`;
+    totalPointsFinalElement.textContent = gameState.totalPoints;
+    correctPercentageElement.textContent = percentage;
+    maxStreakElement.textContent = gameState.maxStreak;
+    finalClassElement.textContent = MATH_LEVELS[gameState.currentLevel].name;
+    
+    if (percentage >= 80) {
+        gameResultElement.textContent = "AUSGEZEICHNET!";
+        gameMessageElement.textContent = "Perfekte Leistung im Training!";
+        gameWonSound.currentTime = 0;
+        gameWonSound.play();
+    } else if (percentage >= 60) {
+        gameResultElement.textContent = "SEHR GUT!";
+        gameMessageElement.textContent = "Gute Leistung - weiter so!";
+    } else if (percentage >= 40) {
+        gameResultElement.textContent = "GUT GEMACHT!";
+        gameMessageElement.textContent = "Solide Leistung - übe weiter!";
+    } else {
+        gameResultElement.textContent = "WEITER ÜBEN!";
+        gameMessageElement.textContent = "Übe regelmäßig, dann wirst du besser!";
+        gameLostSound.currentTime = 0;
+        gameLostSound.play();
+    }
+    
+    gameOverElement.classList.add('active');
+}
+
+// Spiel beenden (Best of 7)
+function endGame(playerWon) {
+    gameState.gameActive = false;
+    
+    choiceButtons.forEach(btn => btn.disabled = true);
+    hintButton.disabled = true;
+    resetButton.disabled = false;
+    
+    const totalQuestions = gameState.totalCorrect + (gameState.totalQuestions - gameState.totalCorrect);
+    const percentage = totalQuestions > 0 ? Math.round((gameState.totalCorrect / totalQuestions) * 100) : 0;
+    
+    finalScoreElement.textContent = `SPIELER ${gameState.playerScore} - ${gameState.cpuScore} CPU`;
+    totalPointsFinalElement.textContent = gameState.totalPoints;
+    correctPercentageElement.textContent = percentage;
+    maxStreakElement.textContent = gameState.maxStreak;
+    finalClassElement.textContent = MATH_LEVELS[gameState.currentLevel].name;
+    
+    if (playerWon) {
+        gameResultElement.textContent = "SIEG!";
+        gameMessageElement.textContent = "Du hast das Best of 7 gewonnen!";
+        gameWonSound.currentTime = 0;
+        gameWonSound.play();
+    } else {
+        gameResultElement.textContent = "NIEDERLAGE";
+        gameMessageElement.textContent = "Die CPU hat das Best of 7 gewonnen.";
+        gameLostSound.currentTime = 0;
+        gameLostSound.play();
+    }
+    
+    gameOverElement.classList.add('active');
+}
+
+// Tipp anzeigen
+function showHint() {
+    if (!gameState.gameActive || gameState.gameFinished) return;
+    
+    const hints = [
+        `Denke an die ${MATH_LEVELS[gameState.currentLevel].name} Regeln`,
+        "Überprüfe deine Rechnung noch einmal",
+        "Schreibe die Aufgabe auf Papier",
+        `Aktuelle Klassenstufe: ${MATH_LEVELS[gameState.currentLevel].name}`
+    ];
+    
+    const randomHint = hints[Math.floor(Math.random() * hints.length)];
+    feedbackElement.textContent = `💡 TIPP: ${randomHint}`;
+    feedbackElement.className = "feedback";
+    
+    hintButton.disabled = true;
+    setTimeout(() => {
+        if (gameState.gameActive && !gameState.gameFinished) {
+            hintButton.disabled = false;
+        }
+    }, 3000);
+}
+
+// Event Listener für Klassenauswahl
+classButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        classButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        gameState.currentLevel = parseInt(btn.dataset.class);
+        
+        if (!gameState.gameActive) {
+            const exampleTask = generateMathTask(gameState.currentLevel);
+            taskElement.textContent = exampleTask.task;
+            classIndicator.textContent = MATH_LEVELS[gameState.currentLevel].name;
+            classIndicator.className = `class-indicator class-${gameState.currentLevel}`;
+        }
+    });
+});
+
+// Event Listener für Zeitauswahl
+timeButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        timeButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        gameState.currentTimeMode = parseInt(btn.dataset.time);
+        gameState.trainingMode = (gameState.currentTimeMode === 0);
+        
+        if (gameState.trainingMode) {
+            trainingInfo.style.display = 'block';
+            trainingProgress.style.display = 'block';
+        } else {
+            trainingInfo.style.display = 'none';
+            trainingProgress.style.display = 'none';
+        }
+    });
+});
+
+// Spiel starten
+function startGame() {
+    if (gameState.gameActive) return;
+    
+    startSound.currentTime = 0;
+    startSound.play();
+    
+    // Reset all states
+    gameState.playerScore = 0;
+    gameState.cpuScore = 0;
+    gameState.currentRound = 1;
+    gameState.playerStreak = 0;
+    gameState.maxStreak = 0;
+    gameState.totalPoints = 0;
+    gameState.totalCorrect = 0;
+    gameState.totalQuestions = 0;
+    gameState.gameActive = true;
+    gameState.gameFinished = false;
+    gameState.lastRingPosition = 6;
+    
+    if (gameState.trainingMode) {
+        gameState.currentTrainingTask = 1;
+        gameState.trainingCorrect = 0;
+    } else {
+        // Reset round-internal state für Best of 7
+        resetRoundInternalState();
+    }
+    
+    // Buttons
+    startButton.disabled = true;
+    resetButton.disabled = false;
+    hintButton.disabled = false;
+    
+    classButtons.forEach(btn => btn.disabled = true);
+    timeButtons.forEach(btn => btn.disabled = true);
+    
+    updateBestOf7Display();
+    
+    feedbackElement.textContent = gameState.trainingMode ? 
+        "TRAINING STARTET! 30 AUFGABEN WARTEN!" : 
+        "BEST OF 7 STARTET! JEDE RUNDE: 10 PUNKTE ZUM GEWINNEN!";
+    feedbackElement.className = "feedback";
+    
+    setTimeout(() => {
+        loadNextQuestion();
+    }, 1500);
+}
+
+// Spiel zurücksetzen
+function resetGame() {
+    stopTimer();
+    
+    gameState.gameActive = false;
+    gameState.gameFinished = false;
+    gameState.playerScore = 0;
+    gameState.cpuScore = 0;
+    gameState.currentRound = 1;
+    gameState.playerStreak = 0;
+    gameState.maxStreak = 0;
+    gameState.totalPoints = 0;
+    gameState.totalCorrect = 0;
+    gameState.totalQuestions = 0;
+    gameState.lastRingPosition = 6;
+    
+    if (gameState.trainingMode) {
+        gameState.currentTrainingTask = 1;
+        gameState.trainingCorrect = 0;
+    }
+    
+    resetRoundInternalState();
+    
+    startButton.disabled = false;
+    resetButton.disabled = true;
+    hintButton.disabled = true;
+    
+    classButtons.forEach(btn => btn.disabled = false);
+    timeButtons.forEach(btn => btn.disabled = false);
+    
+    choiceButtons.forEach(btn => {
+        btn.disabled = true;
+        btn.className = "choice-btn";
+    });
+    
+    const exampleTask = generateMathTask(gameState.currentLevel);
+    taskElement.textContent = exampleTask.task;
+    
+    updateBestOf7Display();
+    
+    feedbackElement.textContent = "WÄHLE KLASSE, ZEIT UND STARTE!";
+    feedbackElement.className = "feedback";
+    
+    ringImage.src = 'wrestlers/ring_position_6.png';
+}
+
+// Event Listener für Controls
+startButton.addEventListener('click', startGame);
+resetButton.addEventListener('click', resetGame);
+hintButton.addEventListener('click', showHint);
+restartButton.addEventListener('click', () => {
+    gameOverElement.classList.remove('active');
+    resetGame();
+});
+
+// Event Listener für Answer Buttons
+choiceButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        checkAnswer(btn.dataset.answer);
+    });
+});
+
+// Spiel initialisieren
+function initGame() {
+    const exampleTask = generateMathTask(gameState.currentLevel);
+    taskElement.textContent = exampleTask.task;
+    classIndicator.textContent = MATH_LEVELS[gameState.currentLevel].name;
+    
+    updateBestOf7Display();
+    
+    const wrongAnswers = generateWrongAnswers(exampleTask.correctAnswer, gameState.currentLevel);
+    const allAnswers = [exampleTask.correctAnswer, ...wrongAnswers];
+    shuffleArray(allAnswers);
+    
+    choiceButtons.forEach((btn, index) => {
+        btn.textContent = allAnswers[index];
+        btn.dataset.answer = allAnswers[index];
+    });
+    
+    ringImage.src = 'wrestlers/ring_position_6.png';
+    gameState.lastRingPosition = 6;
+    
+    // Round-initial state setzen
+    resetRoundInternalState();
+}
+
+initGame();
